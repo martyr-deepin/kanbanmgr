@@ -85,6 +85,51 @@ func getProjects() ([]*github.Project, error) {
 	return ret, nil
 }
 
+func findCard(card *github.ProjectCard) int {
+	for i, cd := range metaCards {
+		if cd.GetID() == card.GetID() {
+			return i
+		}
+	}
+	return -1
+}
+
+func AppendCard(card *github.ProjectCard) error {
+	cardsLock.Lock()
+	defer cardsLock.Unlock()
+
+	metaCards = append(metaCards, card)
+	return nil
+}
+
+func RemoveCard(card *github.ProjectCard) error {
+	cardsLock.Lock()
+	defer cardsLock.Unlock()
+
+	index := findCard(card)
+	if index == -1 {
+		return errors.New("card's not in project")
+	}
+
+	metaCards[index] = metaCards[len(metaCards)-1]
+	metaCards[len(metaCards)-1] = nil
+	metaCards = metaCards[:len(metaCards)-1]
+	return nil
+}
+
+func ConvertCard(card *github.ProjectCard) error {
+	cardsLock.Lock()
+	defer cardsLock.Unlock()
+
+	index := findCard(card)
+	if index == -1 {
+		return errors.New("card's not in project")
+	}
+
+	metaCards[index] = card
+	return nil
+}
+
 func UpdateKanbanMetadata() error {
 	cardsLock.Lock()
 	defer cardsLock.Unlock()
@@ -103,7 +148,6 @@ func UpdateKanbanMetadata() error {
 				return err
 			}
 			for _, col := range columns {
-
 				cards, err := getColumnCards(col)
 				if err != nil {
 					return err
