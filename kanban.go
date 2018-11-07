@@ -158,8 +158,9 @@ func UpdateKanbanMetadata() error {
 					metaCards = append(metaCards, card)
 				}
 
-				logrus.Infof("got %v cards in project \"%v\" column \"%v\"", len(metaCards), TargetProject, col.GetName())
+				logrus.Infof("got %v cards in column \"%v\"", len(cards), col.GetName())
 			}
+			logrus.Infof("got total %v cards in project \"%v\"", len(metaCards), TargetProject)
 
 			metaColumns = append(metaColumns, columns...)
 		}
