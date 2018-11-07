@@ -87,7 +87,7 @@ func githubWebhooks(rw http.ResponseWriter, r *http.Request) {
 			logrus.Infof("issue \"%v\" is now only assigned to %v", issue.GetTitle(), assignee.GetLogin())
 			column, err := GetIssueColumn(issue)
 			if err != nil {
-				logrus.Infof("cant't get the column the issue \"%v\" belongs to , maybe not in the project %v ?", issue.GetTitle(), TargetProject)
+				logrus.Infof("cant't get the column issue \"%v\" belongs to", issue.GetTitle(), TargetProject)
 				break
 			}
 			logrus.Infof("issue \"%v\" is now in column %v", issue.GetTitle(), column.GetName())

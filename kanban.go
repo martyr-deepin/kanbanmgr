@@ -15,7 +15,6 @@ var (
 	metaColumns []*github.ProjectColumn
 	cardsLock   sync.Mutex
 
-	errNotInProject   = errors.New("not in the target project")
 	errNotInTargetCol = errors.New("not in the target columns")
 )
 
@@ -130,7 +129,7 @@ func RemoveCard(card *github.ProjectCard) error {
 
 	index := findCard(card)
 	if index == -1 {
-		return errNotInProject
+		return errNotInTargetCol
 	}
 
 	metaCards[index] = metaCards[len(metaCards)-1]
@@ -150,7 +149,7 @@ func ConvertCard(card *github.ProjectCard) error {
 
 	index := findCard(card)
 	if index == -1 {
-		return errNotInProject
+		return errNotInTargetCol
 	}
 
 	metaCards[index] = card
@@ -224,7 +223,7 @@ func moveIssue(issue *github.Issue, column *github.ProjectColumn) error {
 			return err
 		}
 	}
-	return errNotInProject
+	return errNotInTargetCol
 }
 
 func moveIssueToColumn(issue *github.Issue, columnName string) error {
@@ -257,7 +256,7 @@ func getCardColumn(card *github.ProjectCard) (*github.ProjectColumn, error) {
 		}
 	}
 
-	return nil, errNotInProject
+	return nil, errNotInTargetCol
 }
 
 func GetIssueColumn(issue *github.Issue) (*github.ProjectColumn, error) {
@@ -274,5 +273,5 @@ func GetIssueColumn(issue *github.Issue) (*github.ProjectColumn, error) {
 		}
 	}
 
-	return nil, errNotInProject
+	return nil, errNotInTargetCol
 }
