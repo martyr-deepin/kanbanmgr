@@ -56,11 +56,11 @@ func githubWebhooks(rw http.ResponseWriter, r *http.Request) {
 	}
 	switch event := event.(type) {
 	case *github.IssuesEvent:
-		inTargetOrganization := event.GetRepo().GetOrganization().GetLogin() == OrgName
-		logrus.Infof("%v %v", event.GetRepo().GetOrganization().GetName(), event.GetRepo().GetOrganization().GetLogin())
-		if !inTargetOrganization {
-			break
-		}
+		// FIXME(hualet): don't know why GetLogin or GetName both returns empty
+		// inTargetOrganization := event.GetRepo().GetOrganization().GetLogin() == OrgName
+		// if !inTargetOrganization {
+		// 	break
+		// }
 
 		issue := event.GetIssue()
 		action := event.GetAction()
