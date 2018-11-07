@@ -14,6 +14,9 @@ var (
 	metaCards   []*github.ProjectCard
 	metaColumns []*github.ProjectColumn
 	cardsLock   sync.Mutex
+
+	errNotInProject   = errors.New("not in the target project")
+	errNotInTargetCol = errors.New("not in the target columns")
 )
 
 func getColumnCards(column *github.ProjectColumn) ([]*github.ProjectCard, error) {
@@ -94,9 +97,23 @@ func findCard(card *github.ProjectCard) int {
 	return -1
 }
 
+func checkInTargetColumns(card *github.ProjectCard) bool {
+	col, err := getCardColumn(card)
+	if err != nil {
+		return false
+	}
+
+	return (col.GetName() == DevelopingColumnName || col.GetName() == TestingColumnName)
+}
+
 func AppendCard(card *github.ProjectCard) error {
 	cardsLock.Lock()
 	defer cardsLock.Unlock()
+
+	in := checkInTargetColumns(card)
+	if !in {
+		return errNotInTargetCol
+	}
 
 	metaCards = append(metaCards, card)
 	return nil
@@ -106,9 +123,14 @@ func RemoveCard(card *github.ProjectCard) error {
 	cardsLock.Lock()
 	defer cardsLock.Unlock()
 
+	in := checkInTargetColumns(card)
+	if !in {
+		return errNotInTargetCol
+	}
+
 	index := findCard(card)
 	if index == -1 {
-		return errors.New("card's not in project")
+		return errNotInProject
 	}
 
 	metaCards[index] = metaCards[len(metaCards)-1]
@@ -121,16 +143,21 @@ func ConvertCard(card *github.ProjectCard) error {
 	cardsLock.Lock()
 	defer cardsLock.Unlock()
 
+	in := checkInTargetColumns(card)
+	if !in {
+		return errNotInTargetCol
+	}
+
 	index := findCard(card)
 	if index == -1 {
-		return errors.New("card's not in project")
+		return errNotInProject
 	}
 
 	metaCards[index] = card
 	return nil
 }
 
-func UpdateKanbanMetadata() error {
+func PrepareKanbanMetadata() error {
 	cardsLock.Lock()
 	defer cardsLock.Unlock()
 
@@ -148,10 +175,15 @@ func UpdateKanbanMetadata() error {
 				return err
 			}
 			for _, col := range columns {
+				if col.GetName() != TestingColumnName && col.GetName() != DevelopingColumnName {
+					continue
+				}
+
 				cards, err := getColumnCards(col)
 				if err != nil {
 					return err
 				}
+
 				for _, card := range cards {
 					columnID := col.GetID()
 					card.ColumnID = &columnID
@@ -160,8 +192,6 @@ func UpdateKanbanMetadata() error {
 
 				logrus.Infof("got %v cards in column \"%v\"", len(cards), col.GetName())
 			}
-			logrus.Infof("got total %v cards in project \"%v\"", len(metaCards), TargetProject)
-
 			metaColumns = append(metaColumns, columns...)
 		}
 	}
@@ -197,7 +227,7 @@ func moveIssue(issue *github.Issue, column *github.ProjectColumn) error {
 			return err
 		}
 	}
-	return errors.New("the issue is not in the project")
+	return errNotInProject
 }
 
 func moveIssueToColumn(issue *github.Issue, columnName string) error {
@@ -217,6 +247,19 @@ func MoveToDeveloping(issue *github.Issue) error {
 	return moveIssueToColumn(issue, DevelopingColumnName)
 }
 
+func getCardColumn(card *github.ProjectCard) (*github.ProjectColumn, error) {
+	cardsLock.Lock()
+	defer cardsLock.Unlock()
+
+	for _, col := range metaColumns {
+		if col.GetID() == card.GetColumnID() {
+			return col, nil
+		}
+	}
+
+	return nil, errNotInProject
+}
+
 func GetIssueColumn(issue *github.Issue) (*github.ProjectColumn, error) {
 	cardsLock.Lock()
 	defer cardsLock.Unlock()
@@ -231,5 +274,5 @@ func GetIssueColumn(issue *github.Issue) (*github.ProjectColumn, error) {
 		}
 	}
 
-	return nil, errors.New("the issue is not in the project")
+	return nil, errNotInProject
 }

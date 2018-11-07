@@ -32,7 +32,7 @@ func init() {
 		logrus.Fatalf("failed to update teams metadata: %v", err)
 	}
 
-	err = UpdateKanbanMetadata()
+	err = PrepareKanbanMetadata()
 	if err != nil {
 		logrus.Fatalf("failed to update kanban metadata: %v", err)
 	}
@@ -84,13 +84,13 @@ func githubWebhooks(rw http.ResponseWriter, r *http.Request) {
 		logrus.Infof("issue \"%v\" has new assignees: %v", issue.GetTitle(), assignees)
 		if len(issue.Assignees) == 1 && *issue.State == "open" {
 			assignee := issue.Assignees[0]
-			logrus.Infof("the issue \"%v\" is now only assigned to %v", issue.GetTitle(), assignee.GetLogin())
+			logrus.Infof("issue \"%v\" is now only assigned to %v", issue.GetTitle(), assignee.GetLogin())
 			column, err := GetIssueColumn(issue)
 			if err != nil {
 				logrus.Infof("cant't get the column the issue \"%v\" belongs to , maybe not in the project %v ?", issue.GetTitle(), TargetProject)
 				break
 			}
-			logrus.Infof("the issue \"%v\" is now in column %v", issue.GetTitle(), column.GetName())
+			logrus.Infof("issue \"%v\" is now in column %v", issue.GetTitle(), column.GetName())
 			if CheckUserMemeberOfQATeam(assignee.GetLogin()) && column.GetName() == DevelopingColumnName {
 				logrus.Infof("moving it to %v", TestingColumnName)
 				err := MoveToTesting(issue)
@@ -115,20 +115,26 @@ func githubWebhooks(rw http.ResponseWriter, r *http.Request) {
 		}
 
 		logrus.Infof("project card \"%v\" %v ", card.GetURL(), action)
+
 		if action == "created" {
 			err := AppendCard(card)
-			if err != nil {
+			if err != nil && err != errNotInTargetCol {
 				logrus.Errorf("failed to append new card \"v\": v", card.GetURL(), err)
 			}
 		} else if action == "deleted" {
 			err := RemoveCard(card)
-			if err != nil {
+			if err != nil && err != errNotInTargetCol {
 				logrus.Errorf("failed to remove card \"v\": v", card.GetURL(), err)
 			}
 		} else if action == "converted" {
 			err := ConvertCard(card)
-			if err != nil {
+			if err != nil && err != errNotInTargetCol {
 				logrus.Errorf("failed to update card \"v\": v", card.GetURL(), err)
+			}
+		} else if action == "moved" {
+			err := AppendCard(card)
+			if err != nil && err != errNotInTargetCol {
+				logrus.Errorf("failed to append new card \"v\": v", card.GetURL(), err)
 			}
 		}
 	}
