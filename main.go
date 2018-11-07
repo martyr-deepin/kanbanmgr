@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
 
 	"github.com/sirupsen/logrus"
@@ -40,20 +41,27 @@ func init() {
 }
 
 func githubWebhooks(rw http.ResponseWriter, r *http.Request) {
+	var event interface{}
+
 	payload, err := github.ValidatePayload(r, []byte(WebhookSecret))
 	if err != nil {
-		logrus.Infof("validate payload failed: %v", err)
-		rw.WriteHeader(400)
-		rw.Write([]byte(err.Error()))
-		return
+		logrus.Errorf("validate payload failed: %v", err)
+	} else {
+		event, err = github.ParseWebHook(github.WebHookType(r), payload)
+		if err != nil {
+			logrus.Errorf("parse webhook failed: %v", err)
+		}
 	}
-	event, err := github.ParseWebHook(github.WebHookType(r), payload)
+
 	if err != nil {
-		logrus.Infof("parse webhook failed: %v", err)
+		body, _ := ioutil.ReadAll(r.Body)
+		logrus.Errorf("request body: %v", string(body))
+
 		rw.WriteHeader(400)
 		rw.Write([]byte(err.Error()))
 		return
 	}
+
 	switch event := event.(type) {
 	case *github.IssuesEvent:
 		// FIXME(hualet): don't know why GetLogin or GetName both returns empty
