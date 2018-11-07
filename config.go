@@ -25,6 +25,8 @@ var (
 	// AppInstallationID is the ID of the installation,
 	// which will show in the address bar if you're trying to configure a github app.
 	AppInstallationID int
+	// ServePort is the port will be used.
+	ServePort = 7788
 )
 
 func init() {
@@ -63,5 +65,9 @@ func init() {
 	appinstallationid, found := os.LookupEnv("APP_INSTALLATION_ID")
 	if found {
 		AppInstallationID, _ = strconv.Atoi(appinstallationid)
+	}
+	serveport, found := os.LookupEnv("SERVE_PORT")
+	if found {
+		ServePort, _ = strconv.Atoi(serveport)
 	}
 }

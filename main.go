@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/sirupsen/logrus"
@@ -82,5 +83,5 @@ func githubWebhooks(rw http.ResponseWriter, r *http.Request) {
 
 func main() {
 	http.HandleFunc("/", githubWebhooks)
-	logrus.Fatal(http.ListenAndServe(":7788", nil))
+	logrus.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", ServePort), nil))
 }
