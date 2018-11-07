@@ -214,9 +214,6 @@ func moveCard(card *github.ProjectCard, column *github.ProjectColumn) error {
 }
 
 func moveIssue(issue *github.Issue, column *github.ProjectColumn) error {
-	cardsLock.Lock()
-	defer cardsLock.Unlock()
-
 	for _, card := range metaCards {
 		if card.GetContentURL() == issue.GetURL() && card.GetColumnID() != column.GetID() {
 			err := moveCard(card, column)
@@ -240,17 +237,20 @@ func moveIssueToColumn(issue *github.Issue, columnName string) error {
 }
 
 func MoveToTesting(issue *github.Issue) error {
+	cardsLock.Lock()
+	defer cardsLock.Unlock()
+
 	return moveIssueToColumn(issue, TestingColumnName)
 }
 
 func MoveToDeveloping(issue *github.Issue) error {
+	cardsLock.Lock()
+	defer cardsLock.Unlock()
+
 	return moveIssueToColumn(issue, DevelopingColumnName)
 }
 
 func getCardColumn(card *github.ProjectCard) (*github.ProjectColumn, error) {
-	cardsLock.Lock()
-	defer cardsLock.Unlock()
-
 	for _, col := range metaColumns {
 		if col.GetID() == card.GetColumnID() {
 			return col, nil
