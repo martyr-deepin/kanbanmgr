@@ -20,7 +20,7 @@ func init() {
 
 	// setup the github apps client
 	tr := http.DefaultTransport
-	itr, err := ghinstallation.NewKeyFromFile(tr, 20288, AppInstallationID, PEMFilePath)
+	itr, err := ghinstallation.NewKeyFromFile(tr, AppID, AppInstallationID, PEMFilePath)
 	if err != nil {
 		logrus.Fatalf("failed to init %v", err)
 	}
