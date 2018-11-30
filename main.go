@@ -81,27 +81,27 @@ func githubWebhooks(rw http.ResponseWriter, r *http.Request) {
 		for _, ass := range issue.Assignees {
 			assignees = append(assignees, ass.GetLogin())
 		}
-		logrus.Infof("issue \"%v\" has new assignees: %v", issue.GetTitle(), assignees)
+		logrus.Infof("issue %q has new assignees: %v", issue.GetTitle(), assignees)
 		if len(issue.Assignees) == 1 && *issue.State == "open" {
 			assignee := issue.Assignees[0]
-			logrus.Infof("issue \"%v\" is now only assigned to %v", issue.GetTitle(), assignee.GetLogin())
+			logrus.Infof("issue %q is now only assigned to %v", issue.GetTitle(), assignee.GetLogin())
 			column, err := GetIssueColumn(issue)
 			if err != nil {
-				logrus.Infof("cant't get the column issue \"%v\" belongs to", issue.GetTitle(), TargetProject)
+				logrus.Infof("can not get the column of issue %q", issue.GetTitle())
 				break
 			}
-			logrus.Infof("issue \"%v\" is now in column %v", issue.GetTitle(), column.GetName())
+			logrus.Infof("issue %q is now in column %v", issue.GetTitle(), column.GetName())
 			if CheckUserMemeberOfQATeam(assignee.GetLogin()) && column.GetName() == DevelopingColumnName {
 				logrus.Infof("moving it to %v", TestingColumnName)
 				err := MoveToTesting(issue)
 				if err != nil {
-					logrus.Errorf("failed to move issue \"%v\" to %v: %v", issue.GetTitle(), TestingColumnName, err)
+					logrus.Errorf("failed to move issue %q to %v: %v", issue.GetTitle(), TestingColumnName, err)
 				}
 			} else if CheckUserMemeberOfDevTeam(assignee.GetLogin()) && column.GetName() == TestingColumnName {
 				logrus.Infof("moving it to %v", DevelopingColumnName)
 				err := MoveToDeveloping(issue)
 				if err != nil {
-					logrus.Errorf("failed to move issue \"%v\" to %v: %v", issue.GetTitle(), DevelopingColumnName, err)
+					logrus.Errorf("failed to move issue %q to %v: %v", issue.GetTitle(), DevelopingColumnName, err)
 				}
 			}
 		}
@@ -114,27 +114,27 @@ func githubWebhooks(rw http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		logrus.Infof("project card \"%v\" %v ", card.GetURL(), action)
+		logrus.Infof("project card %q %v ", card.GetURL(), action)
 
 		if action == "created" {
 			err := AppendCard(card)
 			if err != nil && err != errNotInTargetCol {
-				logrus.Errorf("failed to append new card \"v\": v", card.GetURL(), err)
+				logrus.Errorf("failed to append new card %q: %v", card.GetURL(), err)
 			}
 		} else if action == "deleted" {
 			err := RemoveCard(card)
 			if err != nil && err != errNotInTargetCol {
-				logrus.Errorf("failed to remove card \"v\": v", card.GetURL(), err)
+				logrus.Errorf("failed to remove card %q: %v", card.GetURL(), err)
 			}
 		} else if action == "converted" {
 			err := ConvertCard(card)
 			if err != nil && err != errNotInTargetCol {
-				logrus.Errorf("failed to update card \"v\": v", card.GetURL(), err)
+				logrus.Errorf("failed to update card %q: %v", card.GetURL(), err)
 			}
 		} else if action == "moved" {
-			err := AppendCard(card)
+			err := handleCardMoved(card)
 			if err != nil && err != errNotInTargetCol {
-				logrus.Errorf("failed to append new card \"v\": v", card.GetURL(), err)
+				logrus.Errorf("failed to append new card %q: %v", card.GetURL(), err)
 			}
 		}
 	}

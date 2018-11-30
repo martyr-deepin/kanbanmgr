@@ -102,7 +102,7 @@ func checkInTargetColumns(card *github.ProjectCard) bool {
 		return false
 	}
 
-	return (col.GetName() == DevelopingColumnName || col.GetName() == TestingColumnName)
+	return col.GetName() == DevelopingColumnName || col.GetName() == TestingColumnName
 }
 
 func AppendCard(card *github.ProjectCard) error {
@@ -153,6 +153,40 @@ func ConvertCard(card *github.ProjectCard) error {
 	}
 
 	metaCards[index] = card
+	return nil
+}
+
+func handleCardMoved(card *github.ProjectCard) error {
+	cardsLock.Lock()
+	defer cardsLock.Unlock()
+
+	in := checkInTargetColumns(card)
+	index := findCard(card)
+
+	if in {
+		// move into
+		if index == -1 {
+			// append
+			metaCards = append(metaCards, card)
+			logrus.Info("handleCardMoved append")
+		} else {
+			// update
+			metaCards[index] = card
+			logrus.Info("handleCardMoved update")
+		}
+
+	} else {
+		// move out
+		if index == -1 {
+			logrus.Info("handleCardMoved ignore")
+		} else {
+			// delete
+			metaCards[index] = metaCards[len(metaCards)-1]
+			metaCards[len(metaCards)-1] = nil
+			metaCards = metaCards[:len(metaCards)-1]
+			logrus.Info("handleCardMoved delete")
+		}
+	}
 	return nil
 }
 
