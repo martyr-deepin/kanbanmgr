@@ -1,21 +1,23 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
+	"github.com/whiteShtef/clockwork"
 	"io/ioutil"
 	"net/http"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/bradleyfalzon/ghinstallation"
 	"github.com/google/go-github/github"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/sirupsen/logrus"
 )
 
 var (
 	client *github.Client
 )
 
-func init() {
+func initGithubData() {
 	var err error
 
 	// setup the github apps client
@@ -71,40 +73,16 @@ func githubWebhooks(rw http.ResponseWriter, r *http.Request) {
 		// }
 
 		issue := event.GetIssue()
+		issue.Repository = event.GetRepo()
 		action := event.GetAction()
-		inTargetActions := action == "assigned" || action == "unassigned"
-		if !inTargetActions {
-			break
+
+		switch action {
+		case "edited":
+			processIssueDeadline(issue)
+		case "assigned", "unassigned":
+			handleIssueAssigneeChanged(issue)
 		}
 
-		assignees := []string{}
-		for _, ass := range issue.Assignees {
-			assignees = append(assignees, ass.GetLogin())
-		}
-		logrus.Infof("issue %q has new assignees: %v", issue.GetTitle(), assignees)
-		if len(issue.Assignees) == 1 && *issue.State == "open" {
-			assignee := issue.Assignees[0]
-			logrus.Infof("issue %q is now only assigned to %v", issue.GetTitle(), assignee.GetLogin())
-			column, err := GetIssueColumn(issue)
-			if err != nil {
-				logrus.Infof("can not get the column of issue %q", issue.GetTitle())
-				break
-			}
-			logrus.Infof("issue %q is now in column %v", issue.GetTitle(), column.GetName())
-			if CheckUserMemeberOfQATeam(assignee.GetLogin()) && column.GetName() == DevelopingColumnName {
-				logrus.Infof("moving it to %v", TestingColumnName)
-				err := MoveToTesting(issue)
-				if err != nil {
-					logrus.Errorf("failed to move issue %q to %v: %v", issue.GetTitle(), TestingColumnName, err)
-				}
-			} else if CheckUserMemeberOfDevTeam(assignee.GetLogin()) && column.GetName() == TestingColumnName {
-				logrus.Infof("moving it to %v", DevelopingColumnName)
-				err := MoveToDeveloping(issue)
-				if err != nil {
-					logrus.Errorf("failed to move issue %q to %v: %v", issue.GetTitle(), DevelopingColumnName, err)
-				}
-			}
-		}
 	case *github.ProjectCardEvent:
 		card := event.GetProjectCard()
 		action := event.GetAction()
@@ -114,34 +92,93 @@ func githubWebhooks(rw http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		logrus.Infof("project card %q %v ", card.GetURL(), action)
+		logrus.Infof("project card %d %v ", card.GetID(), action)
 
-		if action == "created" {
-			err := AppendCard(card)
-			if err != nil && err != errNotInTargetCol {
-				logrus.Errorf("failed to append new card %q: %v", card.GetURL(), err)
+		switch action {
+		case "created":
+			handleCardCreated(card)
+
+		case "deleted":
+			handleCardDeleted(card)
+
+		case "converted":
+			handleCardConverted(card)
+
+		case "moved":
+			handleCardMoved(card)
+		}
+	}
+}
+
+func handleIssueAssigneeChanged(issue *github.Issue) {
+	var assignees []string
+	for _, ass := range issue.Assignees {
+		assignees = append(assignees, ass.GetLogin())
+	}
+	if len(issue.Assignees) == 1 && issue.GetState() == "open" {
+		assignee := issue.Assignees[0]
+		column, err := GetIssueColumn(issue)
+		if err != nil {
+			return
+		}
+		logrus.Infof("issue %q in column %v is now only assigned to %v",
+			issue.GetTitle(), column.GetName(), assignee.GetLogin())
+
+		if CheckUserMemeberOfQATeam(assignee.GetLogin()) &&
+			column.GetName() == DevelopingColumnName {
+			logrus.Infof("moving it to %v", TestingColumnName)
+			err := MoveToTesting(issue)
+			if err != nil {
+				logrus.Errorf("failed to move issue %q to %v: %v",
+					issue.GetTitle(), TestingColumnName, err)
 			}
-		} else if action == "deleted" {
-			err := RemoveCard(card)
-			if err != nil && err != errNotInTargetCol {
-				logrus.Errorf("failed to remove card %q: %v", card.GetURL(), err)
-			}
-		} else if action == "converted" {
-			err := ConvertCard(card)
-			if err != nil && err != errNotInTargetCol {
-				logrus.Errorf("failed to update card %q: %v", card.GetURL(), err)
-			}
-		} else if action == "moved" {
-			err := handleCardMoved(card)
-			if err != nil && err != errNotInTargetCol {
-				logrus.Errorf("failed to append new card %q: %v", card.GetURL(), err)
+		} else if CheckUserMemeberOfDevTeam(assignee.GetLogin()) &&
+			column.GetName() == TestingColumnName {
+			logrus.Infof("moving it to %v", DevelopingColumnName)
+			err := MoveToDeveloping(issue)
+			if err != nil {
+				logrus.Errorf("failed to move issue %q to %v: %v",
+					issue.GetTitle(), DevelopingColumnName, err)
 			}
 		}
 	}
+}
 
+var db *sql.DB
+
+func initDB() error {
+	var err error
+	db, err = sql.Open("sqlite3", "kanbanmgr.db")
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS issue_deadline (
+		id INTEGER PRIMARY KEY NOT NULL,
+		date DATE NOT NULL,
+		url TEXT NOT NULL,
+		directive TEXT NOT NULL
+		)`)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func main() {
+	var err error
+	err = initDB()
+	if err != nil {
+		logrus.Fatal("failed to init db:", err)
+	}
+	initGithubData()
+	checkIssueDeadlineForAllCards()
+
+	scheduler := clockwork.NewScheduler()
+	scheduler.Schedule().Every().Day().At("1:00").Do(checkIssueDeadlineForAllCards)
+	go scheduler.Run()
+
 	http.HandleFunc("/", githubWebhooks)
 	logrus.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", ServePort), nil))
 }
