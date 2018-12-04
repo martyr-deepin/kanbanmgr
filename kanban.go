@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cosiner/gohper/regexp"
+	"strconv"
 	"sync"
 
 	"github.com/google/go-github/github"
@@ -96,33 +98,39 @@ func findCard(card *github.ProjectCard) int {
 	return -1
 }
 
-func checkInTargetColumns(card *github.ProjectCard) bool {
+func isCardInTargetColumns(card *github.ProjectCard) bool {
 	col, err := getCardColumn(card)
 	if err != nil {
 		return false
 	}
-
-	return col.GetName() == DevelopingColumnName || col.GetName() == TestingColumnName
+	return isTargetColumn(col)
 }
 
-func AppendCard(card *github.ProjectCard) error {
+func isTargetColumn(column *github.ProjectColumn) bool {
+	columnName := column.GetName()
+	return columnName == DevelopingColumnName || columnName == TestingColumnName
+}
+
+func handleCardCreated(card *github.ProjectCard) error {
 	cardsLock.Lock()
 	defer cardsLock.Unlock()
 
-	in := checkInTargetColumns(card)
+	in := isCardInTargetColumns(card)
 	if !in {
 		return errNotInTargetCol
 	}
 
 	metaCards = append(metaCards, card)
+
+	go processCardIssueDeadline(card)
 	return nil
 }
 
-func RemoveCard(card *github.ProjectCard) error {
+func handleCardDeleted(card *github.ProjectCard) error {
 	cardsLock.Lock()
 	defer cardsLock.Unlock()
 
-	in := checkInTargetColumns(card)
+	in := isCardInTargetColumns(card)
 	if !in {
 		return errNotInTargetCol
 	}
@@ -135,14 +143,16 @@ func RemoveCard(card *github.ProjectCard) error {
 	metaCards[index] = metaCards[len(metaCards)-1]
 	metaCards[len(metaCards)-1] = nil
 	metaCards = metaCards[:len(metaCards)-1]
+
+	go deleteCardIssueDeadline(card)
 	return nil
 }
 
-func ConvertCard(card *github.ProjectCard) error {
+func handleCardConverted(card *github.ProjectCard) error {
 	cardsLock.Lock()
 	defer cardsLock.Unlock()
 
-	in := checkInTargetColumns(card)
+	in := isCardInTargetColumns(card)
 	if !in {
 		return errNotInTargetCol
 	}
@@ -153,6 +163,8 @@ func ConvertCard(card *github.ProjectCard) error {
 	}
 
 	metaCards[index] = card
+
+	go processCardIssueDeadline(card)
 	return nil
 }
 
@@ -160,7 +172,7 @@ func handleCardMoved(card *github.ProjectCard) error {
 	cardsLock.Lock()
 	defer cardsLock.Unlock()
 
-	in := checkInTargetColumns(card)
+	in := isCardInTargetColumns(card)
 	index := findCard(card)
 
 	if in {
@@ -169,6 +181,8 @@ func handleCardMoved(card *github.ProjectCard) error {
 			// append
 			metaCards = append(metaCards, card)
 			logrus.Info("handleCardMoved append")
+			go processCardIssueDeadline(card)
+
 		} else {
 			// update
 			metaCards[index] = card
@@ -185,9 +199,52 @@ func handleCardMoved(card *github.ProjectCard) error {
 			metaCards[len(metaCards)-1] = nil
 			metaCards = metaCards[:len(metaCards)-1]
 			logrus.Info("handleCardMoved delete")
+			go deleteCardIssueDeadline(card)
 		}
 	}
 	return nil
+}
+
+func getIssueWithCard(card *github.ProjectCard) (*github.Issue, error) {
+	contentURL := card.GetContentURL()
+	if contentURL != "" {
+		owner, repo, num, err := parseIssueURL(contentURL)
+		if err != nil {
+			return nil, err
+		}
+
+		ctx := context.Background()
+		issue, _, err := client.Issues.Get(ctx, owner, repo, num)
+		if err != nil {
+			return nil, err
+		}
+		return issue, nil
+	}
+	return nil, errors.New("card is not issue")
+}
+
+func processCardIssueDeadline(card *github.ProjectCard) {
+	issue, err := getIssueWithCard(card)
+	if err != nil {
+		logrus.Warning("failed to get issue with card: ", err)
+		return
+	}
+	processIssueDeadline(issue)
+}
+
+func deleteCardIssueDeadline(card *github.ProjectCard) {
+	issue, err := getIssueWithCard(card)
+	if err != nil {
+		logrus.Warning("failed to get issue with card: ", err)
+		return
+	}
+	id := issue.GetID()
+	logrus.Infof("delete issue %d deadline", id)
+	err = deleteIssueDeadline(id)
+	if err != nil {
+		logrus.Warning("failed to delete issue deadline: ", err)
+		return
+	}
 }
 
 func PrepareKanbanMetadata() error {
@@ -308,4 +365,73 @@ func GetIssueColumn(issue *github.Issue) (*github.ProjectColumn, error) {
 	}
 
 	return nil, errNotInTargetCol
+}
+
+func isIssueInTargetColumns(issue *github.Issue) bool {
+	column, err := GetIssueColumn(issue)
+	if err != nil {
+		return false
+	}
+	return isTargetColumn(column)
+}
+
+var regIssueURL = regexp.MustCompile(`/repos/([^/]+)/([^/]+)/issues/(\d+)$`)
+
+func parseIssueURL(contentURL string) (owner, repo string, number int, err error) {
+	match := regIssueURL.FindStringSubmatch(contentURL)
+	if match == nil {
+		err = fmt.Errorf("invalid issue url %q", contentURL)
+		return
+	}
+	owner = match[1]
+	repo = match[2]
+	number, err = strconv.Atoi(match[3])
+	return
+}
+
+var regRepoURL = regexp.MustCompile(`/repos/([^/]+)/([^/]+)$`)
+
+func parseRepoURL(repoURL string) (owner, repo string, err error) {
+	match := regRepoURL.FindStringSubmatch(repoURL)
+	if match == nil {
+		err = fmt.Errorf("invalid repo url %q", repoURL)
+		return
+	}
+	owner = match[1]
+	repo = match[2]
+	return
+}
+
+func checkIssueDeadlineForAllCards() {
+	cardsLock.Lock()
+	defer cardsLock.Unlock()
+
+	for _, card := range metaCards {
+		contentURL := card.GetContentURL()
+		if contentURL == "" {
+			// not issue
+			continue
+		}
+		issueDeadline, err := getIssueDeadlineByURL(contentURL)
+		if err != nil {
+			logrus.Warningf("failed to get issue deadline by url %q: %v", contentURL, err)
+			continue
+		}
+		if issueDeadline == nil {
+			continue
+		}
+		if isDeadlinePassed(issueDeadline.date) {
+			owner, repo, num, err := parseIssueURL(contentURL)
+			if err != nil {
+				logrus.Warning("failed to parse issue url:", err)
+				continue
+			}
+
+			logrus.Infof("%s/%s %d deadline has passed", owner, repo, num)
+			err = addDelayedLabelToIssueAux(owner, repo, num)
+			if err != nil {
+				logrus.Warning("failed to add delayed label to issue: ", err)
+			}
+		}
+	}
 }
